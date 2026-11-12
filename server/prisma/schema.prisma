@@ -98,7 +98,6 @@ model Department {
   employeeDeptHistoryTo     EmployeeDepartmentHistory[]  @relation("ToDepartment")
   assets                    Asset[]
 
-  @@index([code])
   @@map("departments")
 }
 
@@ -331,7 +330,6 @@ model AssetTagSequence {
   assetCategory AssetCategory @relation(fields: [assetCategoryId], references: [id], onDelete: Restrict)
 
   @@unique([assetCategoryId, year])
-  @@index([assetCategoryId, year])
   /// Custom SQL constraints required in migration:
   ///   ALTER TABLE asset_tag_sequences
   ///     ADD CONSTRAINT asset_tag_sequences_last_sequence_non_negative
@@ -453,7 +451,7 @@ model Asset {
   updatedAt          DateTime       @updatedAt @db.Timestamptz
 
   category          AssetCategory     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  purchaseItem      PurchaseItem?     @relation(fields: [purchaseItemId], references: [id])
+  purchaseItem      PurchaseItem?     @relation(fields: [purchaseItemId], references: [id], onDelete: Restrict)
   currentLocation   Location?         @relation(fields: [currentLocationId], references: [id])
   currentDepartment Department?       @relation(fields: [currentDepartmentId], references: [id])
   currentAssignee   Employee?         @relation(fields: [currentAssigneeId], references: [id])
@@ -572,7 +570,7 @@ model StockMovement {
   createdAt            DateTime          @default(now()) @db.Timestamptz
 
   stockItem          StockItem   @relation(fields: [stockItemId], references: [id], onDelete: Restrict)
-  purchaseItem       PurchaseItem? @relation(fields: [purchaseItemId], references: [id])
+  purchaseItem       PurchaseItem? @relation(fields: [purchaseItemId], references: [id], onDelete: Restrict)
   issuedToEmployee   Employee?   @relation("StockMovementEmployee", fields: [issuedToEmployeeId], references: [id])
   issuedToDepartment Department? @relation("StockMovementDepartment", fields: [issuedToDepartmentId], references: [id])
   performedBy        User?       @relation("StockMovementPerformedBy", fields: [performedByUserId], references: [id])
