@@ -1,7 +1,7 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// =============================================================================
+// Inventory Management System — Prisma Schema
+// Prisma 7 | PostgreSQL 18
+// =============================================================================
 
 generator client {
   provider = "prisma-client"
@@ -10,4 +10,679 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  TRANSFERRED
+  TERMINATED
+}
+
+enum PurchaseStatus {
+  DRAFT
+  CONFIRMED
+  RECEIVED
+  CANCELLED
+}
+
+enum AssetCondition {
+  NEW
+  GOOD
+  FAIR
+  POOR
+  DAMAGED
+}
+
+enum AssetStatus {
+  AVAILABLE
+  ASSIGNED
+  UNDER_MAINTENANCE
+  RETIRED
+  DISPOSED
+}
+
+enum StockMovementType {
+  PURCHASE
+  ISSUE
+  RETURN
+  ADJUSTMENT
+  DISPOSAL
+}
+
+enum MaintenanceStatus {
+  REPORTED
+  IN_PROGRESS
+  RESOLVED
+  CANCELLED
+}
+
+enum ImportBatchStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  COMPLETED_WITH_ERRORS
+  FAILED
+}
+
+enum ImportRowStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+// =============================================================================
+// DEPARTMENTS
+// =============================================================================
+
+model Department {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String    @db.VarChar(150)
+  code              String    @unique @db.VarChar(20)
+  /// Nullable — set after employees are created to avoid circular dependency
+  managerEmployeeId String?   @db.Uuid
+  createdAt         DateTime  @default(now()) @db.Timestamptz
+  updatedAt         DateTime  @updatedAt @db.Timestamptz
+
+  manager                   Employee?                    @relation("DepartmentManager", fields: [managerEmployeeId], references: [id])
+  employees                 Employee[]                   @relation("EmployeeDepartment")
+  locations                 Location[]
+  assetAssignments          AssetAssignment[]
+  stockMovementsIssued      StockMovement[]              @relation("StockMovementDepartment")
+  employeeDeptHistoryFrom   EmployeeDepartmentHistory[]  @relation("FromDepartment")
+  employeeDeptHistoryTo     EmployeeDepartmentHistory[]  @relation("ToDepartment")
+  assets                    Asset[]
+
+  @@index([code])
+  @@map("departments")
+}
+
+// =============================================================================
+// LOCATIONS
+// =============================================================================
+
+model Location {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String   @db.VarChar(150)
+  building     String?  @db.VarChar(100)
+  room         String?  @db.VarChar(50)
+  departmentId String?  @db.Uuid
+  createdAt    DateTime @default(now()) @db.Timestamptz
+  updatedAt    DateTime @updatedAt @db.Timestamptz
+
+  department       Department?       @relation(fields: [departmentId], references: [id])
+  employees        Employee[]
+  assets           Asset[]
+  assetAssignments AssetAssignment[]
+
+  @@index([departmentId])
+  @@map("locations")
+}
+
+// =============================================================================
+// EMPLOYEES
+// =============================================================================
+
+model Employee {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeNumber String         @unique @db.VarChar(50)
+  firstName      String         @db.VarChar(100)
+  lastName       String         @db.VarChar(100)
+  email          String         @unique @db.VarChar(255)
+  phone          String?        @db.VarChar(30)
+  jobTitle       String?        @db.VarChar(150)
+  departmentId   String?        @db.Uuid
+  locationId     String?        @db.Uuid
+  status         EmployeeStatus @default(ACTIVE)
+  createdAt      DateTime       @default(now()) @db.Timestamptz
+  updatedAt      DateTime       @updatedAt @db.Timestamptz
+
+  department              Department?                  @relation("EmployeeDepartment", fields: [departmentId], references: [id])
+  location                Location?                    @relation(fields: [locationId], references: [id])
+  managedDepartments      Department[]                 @relation("DepartmentManager")
+  user                    User?
+  assetAssignments        AssetAssignment[]            @relation("AssignmentEmployee")
+  stockMovementsReceived  StockMovement[]              @relation("StockMovementEmployee")
+  departmentHistory       EmployeeDepartmentHistory[]  @relation("EmployeeHistory")
+  currentAssets           Asset[]
+
+  /// employeeNumber and email indexes are provided by their @unique constraints.
+  @@index([departmentId])
+  @@index([status])
+  @@map("employees")
+}
+
+// =============================================================================
+// EMPLOYEE DEPARTMENT HISTORY
+// =============================================================================
+
+model EmployeeDepartmentHistory {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId       String   @db.Uuid
+  fromDepartmentId String?  @db.Uuid
+  toDepartmentId   String   @db.Uuid
+  effectiveDate    DateTime @db.Date
+  reason           String?  @db.Text
+  recordedByUserId String?  @db.Uuid
+  createdAt        DateTime @default(now()) @db.Timestamptz
+
+  employee       Employee    @relation("EmployeeHistory", fields: [employeeId], references: [id])
+  fromDepartment Department? @relation("FromDepartment", fields: [fromDepartmentId], references: [id])
+  toDepartment   Department  @relation("ToDepartment", fields: [toDepartmentId], references: [id])
+  recordedBy     User?       @relation("HistoryRecordedBy", fields: [recordedByUserId], references: [id])
+
+  @@index([employeeId])
+  @@index([effectiveDate])
+  @@map("employee_department_history")
+}
+
+// =============================================================================
+// USERS
+// =============================================================================
+
+model User {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  username     String    @unique @db.VarChar(100)
+  email        String    @unique @db.VarChar(255)
+  /// Never returned in API responses — enforced at the application layer
+  passwordHash String    @db.Text
+  employeeId   String?   @unique @db.Uuid
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime? @db.Timestamptz
+  createdAt    DateTime  @default(now()) @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @db.Timestamptz
+
+  employee                  Employee?                    @relation(fields: [employeeId], references: [id])
+  roles                     UserRole[]
+  auditLogs                 AuditLog[]
+  assignmentsCreated        AssetAssignment[]            @relation("AssignmentCreatedBy")
+  assignmentsReturned       AssetAssignment[]            @relation("AssignmentReturnedBy")
+  purchasesCreated          Purchase[]
+  maintenanceAssigned       MaintenanceRecord[]          @relation("MaintenanceAssignedTo")
+  maintenanceCreated        MaintenanceRecord[]          @relation("MaintenanceCreatedBy")
+  stockMovementsPerformed   StockMovement[]              @relation("StockMovementPerformedBy")
+  importBatches             ImportBatch[]
+  departmentHistoryRecorded EmployeeDepartmentHistory[]  @relation("HistoryRecordedBy")
+  userRolesAssigned         UserRole[]                   @relation("UserRoleAssignedBy")
+
+  /// username, email and employeeId indexes are provided by their @unique constraints.
+  @@map("users")
+}
+
+// =============================================================================
+// ROLES
+// =============================================================================
+
+model Role {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String   @unique @db.VarChar(100)
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@map("roles")
+}
+
+// =============================================================================
+// PERMISSIONS
+// =============================================================================
+
+model Permission {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String   @unique @db.VarChar(150)
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @db.Timestamptz
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+// =============================================================================
+// ROLE PERMISSIONS (junction)
+// =============================================================================
+
+model RolePermission {
+  roleId       String @db.Uuid
+  permissionId String @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// =============================================================================
+// USER ROLES (junction)
+// =============================================================================
+
+model UserRole {
+  userId           String   @db.Uuid
+  roleId           String   @db.Uuid
+  assignedAt       DateTime @default(now()) @db.Timestamptz
+  assignedByUserId String?  @db.Uuid
+
+  user       User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  assignedBy User? @relation("UserRoleAssignedBy", fields: [assignedByUserId], references: [id])
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+// =============================================================================
+// ASSET CATEGORIES
+// =============================================================================
+
+model AssetCategory {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String   @unique @db.VarChar(100)
+  /// Nullable for non-serialized (stock) categories.
+  /// Serialized categories (is_serialized = true) MUST have a non-null prefix.
+  /// Non-null prefixes must be 2–5 uppercase English letters.
+  /// Custom SQL constraints required in migration:
+  ///   ALTER TABLE asset_categories
+  ///     ADD CONSTRAINT asset_categories_tag_prefix_format
+  ///     CHECK (tag_prefix IS NULL OR tag_prefix ~ '^[A-Z]{2,5}$');
+  ///   ALTER TABLE asset_categories
+  ///     ADD CONSTRAINT asset_categories_serialized_requires_prefix
+  ///     CHECK (is_serialized = false OR tag_prefix IS NOT NULL);
+  ///   CREATE UNIQUE INDEX asset_categories_tag_prefix_unique
+  ///     ON asset_categories (tag_prefix)
+  ///     WHERE is_serialized = true AND tag_prefix IS NOT NULL;
+  tagPrefix    String?  @db.VarChar(10)
+  description  String?  @db.Text
+  /// true = individually tracked asset; false = quantity-managed stock
+  isSerialized Boolean  @default(true)
+  createdAt    DateTime @default(now()) @db.Timestamptz
+  updatedAt    DateTime @updatedAt @db.Timestamptz
+
+  assets           Asset[]
+  stockItems       StockItem[]
+  purchaseItems    PurchaseItem[]
+  tagSequences     AssetTagSequence[]
+
+  @@map("asset_categories")
+}
+
+// =============================================================================
+// ASSET TAG SEQUENCES
+// =============================================================================
+
+model AssetTagSequence {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  assetCategoryId String   @db.Uuid
+  /// Calendar year, e.g. 2026
+  year            Int      @db.SmallInt
+  /// Monotonically increasing. Never reduced. Max: 2,147,483,647.
+  lastSequence    Int      @default(0)
+  createdAt       DateTime @default(now()) @db.Timestamptz
+  updatedAt       DateTime @updatedAt @db.Timestamptz
+
+  assetCategory AssetCategory @relation(fields: [assetCategoryId], references: [id], onDelete: Restrict)
+
+  @@unique([assetCategoryId, year])
+  @@index([assetCategoryId, year])
+  /// Custom SQL constraints required in migration:
+  ///   ALTER TABLE asset_tag_sequences
+  ///     ADD CONSTRAINT asset_tag_sequences_last_sequence_non_negative
+  ///     CHECK (last_sequence >= 0);
+  ///   ALTER TABLE asset_tag_sequences
+  ///     ADD CONSTRAINT asset_tag_sequences_year_minimum
+  ///     CHECK (year >= 2000);
+  @@map("asset_tag_sequences")
+}
+
+// =============================================================================
+// VENDORS
+// =============================================================================
+
+model Vendor {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String   @db.VarChar(200)
+  contactName String?  @db.VarChar(150)
+  email       String?  @db.VarChar(255)
+  phone       String?  @db.VarChar(30)
+  address     String?  @db.Text
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  purchases Purchase[]
+
+  @@map("vendors")
+}
+
+// =============================================================================
+// PURCHASES
+// =============================================================================
+
+model Purchase {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  referenceNumber   String         @unique @db.VarChar(100)
+  vendorId          String         @db.Uuid
+  purchaseDate      DateTime       @db.Date
+  totalAmount       Decimal        @db.Decimal(12, 2)
+  status            PurchaseStatus @default(DRAFT)
+  documentReference String?        @db.VarChar(255)
+  notes             String?        @db.Text
+  createdByUserId   String?        @db.Uuid
+  createdAt         DateTime       @default(now()) @db.Timestamptz
+  updatedAt         DateTime       @updatedAt @db.Timestamptz
+
+  vendor         Vendor         @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  createdBy      User?          @relation(fields: [createdByUserId], references: [id])
+  purchaseItems  PurchaseItem[]
+
+  /// referenceNumber index is provided by its @unique constraint.
+  @@index([vendorId])
+  @@index([purchaseDate])
+  @@index([status])
+  @@map("purchases")
+}
+
+// =============================================================================
+// PURCHASE ITEMS
+// =============================================================================
+
+model PurchaseItem {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  purchaseId      String   @db.Uuid
+  description     String   @db.VarChar(255)
+  /// Exactly one of assetCategoryId or stockItemId must be set.
+  /// Enforced by CHECK constraint in custom migration:
+  ///   CHECK (
+  ///     (asset_category_id IS NOT NULL AND stock_item_id IS NULL) OR
+  ///     (asset_category_id IS NULL AND stock_item_id IS NOT NULL)
+  ///   )
+  assetCategoryId String?  @db.Uuid
+  stockItemId     String?  @db.Uuid
+  /// Must be > 0. Enforced by CHECK constraint in custom migration:
+  ///   CHECK (quantity > 0)
+  quantity        Int
+  /// Must be >= 0. Enforced by CHECK constraint in custom migration:
+  ///   CHECK (unit_cost >= 0)
+  unitCost        Decimal  @db.Decimal(12, 2)
+  totalCost       Decimal  @db.Decimal(12, 2)
+  createdAt       DateTime @default(now()) @db.Timestamptz
+
+  /// Restrict prevents purchase deletion from cascading into purchase items
+  /// and disconnecting historical asset or stock movement records.
+  purchase      Purchase       @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  assetCategory AssetCategory? @relation(fields: [assetCategoryId], references: [id])
+  stockItem     StockItem?     @relation(fields: [stockItemId], references: [id])
+  assets        Asset[]
+  stockMovements StockMovement[]
+
+  @@index([purchaseId])
+  @@map("purchase_items")
+}
+
+// =============================================================================
+// ASSETS
+// =============================================================================
+
+model Asset {
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  assetTag           String         @unique @db.VarChar(100)
+  serialNumber       String?        @unique @db.VarChar(200)
+  name               String         @db.VarChar(255)
+  categoryId         String         @db.Uuid
+  manufacturer       String?        @db.VarChar(150)
+  model              String?        @db.VarChar(150)
+  purchaseItemId     String?        @db.Uuid
+  purchaseDate       DateTime?      @db.Date
+  purchaseCost       Decimal?       @db.Decimal(12, 2)
+  warrantyExpiryDate DateTime?      @db.Date
+  condition          AssetCondition @default(NEW)
+  status             AssetStatus    @default(AVAILABLE)
+  currentLocationId  String?        @db.Uuid
+  currentDepartmentId String?       @db.Uuid
+  currentAssigneeId  String?        @db.Uuid
+  notes              String?        @db.Text
+  createdAt          DateTime       @default(now()) @db.Timestamptz
+  updatedAt          DateTime       @updatedAt @db.Timestamptz
+
+  category          AssetCategory     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  purchaseItem      PurchaseItem?     @relation(fields: [purchaseItemId], references: [id])
+  currentLocation   Location?         @relation(fields: [currentLocationId], references: [id])
+  currentDepartment Department?       @relation(fields: [currentDepartmentId], references: [id])
+  currentAssignee   Employee?         @relation(fields: [currentAssigneeId], references: [id])
+  assignments       AssetAssignment[]
+  maintenanceRecords MaintenanceRecord[]
+
+  /// assetTag and serialNumber indexes are provided by their @unique constraints.
+  @@index([categoryId])
+  @@index([status])
+  @@index([currentAssigneeId])
+  @@index([currentDepartmentId])
+  @@map("assets")
+}
+
+// =============================================================================
+// ASSET ASSIGNMENTS
+// =============================================================================
+
+model AssetAssignment {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  assetId          String    @db.Uuid
+  employeeId       String    @db.Uuid
+  departmentId     String?   @db.Uuid
+  locationId       String?   @db.Uuid
+  assignedAt       DateTime  @default(now()) @db.Timestamptz
+  /// Null means the assignment is currently open (asset not yet returned)
+  returnedAt       DateTime? @db.Timestamptz
+  notes            String?   @db.Text
+  assignedByUserId String?   @db.Uuid
+  returnedByUserId String?   @db.Uuid
+  createdAt        DateTime  @default(now()) @db.Timestamptz
+
+  asset      Asset      @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  employee   Employee   @relation("AssignmentEmployee", fields: [employeeId], references: [id], onDelete: Restrict)
+  department Department? @relation(fields: [departmentId], references: [id])
+  location   Location?   @relation(fields: [locationId], references: [id])
+  assignedBy User?       @relation("AssignmentCreatedBy", fields: [assignedByUserId], references: [id])
+  returnedBy User?       @relation("AssignmentReturnedBy", fields: [returnedByUserId], references: [id])
+
+  @@index([assetId])
+  @@index([employeeId])
+  @@index([assignedAt])
+  @@index([returnedAt])
+  @@map("asset_assignments")
+}
+
+// =============================================================================
+// STOCK ITEMS
+// =============================================================================
+
+model StockItem {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String   @db.VarChar(255)
+  sku             String   @unique @db.VarChar(100)
+  categoryId      String?  @db.Uuid
+  unit            String   @default("piece") @db.VarChar(50)
+  /// Cached quantity — updated transactionally with every StockMovement.
+  /// Must not go below 0. Enforced by CHECK constraint in custom migration:
+  ///   CHECK (current_quantity >= 0)
+  currentQuantity Int      @default(0)
+  /// Minimum stock level for low-stock alerts.
+  /// Enforced by CHECK constraint in custom migration:
+  ///   CHECK (minimum_quantity >= 0)
+  minimumQuantity Int      @default(0)
+  notes           String?  @db.Text
+  createdAt       DateTime @default(now()) @db.Timestamptz
+  updatedAt       DateTime @updatedAt @db.Timestamptz
+
+  category       AssetCategory?  @relation(fields: [categoryId], references: [id])
+  stockMovements StockMovement[]
+  purchaseItems  PurchaseItem[]
+
+  @@map("stock_items")
+}
+
+// =============================================================================
+// STOCK MOVEMENTS
+// =============================================================================
+
+model StockMovement {
+  id                   String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stockItemId          String            @db.Uuid
+  movementType         StockMovementType
+  /// Sign rules enforced by movement type:
+  ///   PURCHASE, RETURN  -> quantity > 0
+  ///   ISSUE, DISPOSAL   -> quantity < 0
+  ///   ADJUSTMENT        -> quantity != 0 (positive or negative)
+  /// Custom SQL constraints required in migration:
+  ///   ALTER TABLE stock_movements
+  ///     ADD CONSTRAINT stock_movements_quantity_non_zero
+  ///     CHECK (quantity != 0);
+  ///   ALTER TABLE stock_movements
+  ///     ADD CONSTRAINT stock_movements_quantity_before_non_negative
+  ///     CHECK (quantity_before >= 0);
+  ///   ALTER TABLE stock_movements
+  ///     ADD CONSTRAINT stock_movements_quantity_after_non_negative
+  ///     CHECK (quantity_after >= 0);
+  ///   ALTER TABLE stock_movements
+  ///     ADD CONSTRAINT stock_movements_quantity_arithmetic
+  ///     CHECK (quantity_after = quantity_before + quantity);
+  ///   ALTER TABLE stock_movements
+  ///     ADD CONSTRAINT stock_movements_purchase_return_positive
+  ///     CHECK (movement_type NOT IN ('PURCHASE', 'RETURN') OR quantity > 0);
+  ///   ALTER TABLE stock_movements
+  ///     ADD CONSTRAINT stock_movements_issue_disposal_negative
+  ///     CHECK (movement_type NOT IN ('ISSUE', 'DISPOSAL') OR quantity < 0);
+  quantity             Int
+  quantityBefore       Int
+  quantityAfter        Int
+  purchaseItemId       String?           @db.Uuid
+  issuedToEmployeeId   String?           @db.Uuid
+  issuedToDepartmentId String?           @db.Uuid
+  reference            String?           @db.VarChar(255)
+  notes                String?           @db.Text
+  performedByUserId    String?           @db.Uuid
+  createdAt            DateTime          @default(now()) @db.Timestamptz
+
+  stockItem          StockItem   @relation(fields: [stockItemId], references: [id], onDelete: Restrict)
+  purchaseItem       PurchaseItem? @relation(fields: [purchaseItemId], references: [id])
+  issuedToEmployee   Employee?   @relation("StockMovementEmployee", fields: [issuedToEmployeeId], references: [id])
+  issuedToDepartment Department? @relation("StockMovementDepartment", fields: [issuedToDepartmentId], references: [id])
+  performedBy        User?       @relation("StockMovementPerformedBy", fields: [performedByUserId], references: [id])
+
+  @@index([stockItemId])
+  @@index([movementType])
+  @@index([createdAt])
+  @@map("stock_movements")
+}
+
+// =============================================================================
+// MAINTENANCE RECORDS
+// =============================================================================
+
+model MaintenanceRecord {
+  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  assetId            String            @db.Uuid
+  problemDescription String            @db.Text
+  repairDescription  String?           @db.Text
+  status             MaintenanceStatus @default(REPORTED)
+  reportedDate       DateTime          @db.Date
+  resolvedDate       DateTime?         @db.Date
+  /// Must be >= 0 when provided. Enforced by CHECK constraint in custom migration:
+  ///   CHECK (repair_cost IS NULL OR repair_cost >= 0)
+  repairCost         Decimal?          @db.Decimal(10, 2)
+  technician         String?           @db.VarChar(150)
+  assignedToUserId   String?           @db.Uuid
+  notes              String?           @db.Text
+  createdByUserId    String?           @db.Uuid
+  createdAt          DateTime          @default(now()) @db.Timestamptz
+  updatedAt          DateTime          @updatedAt @db.Timestamptz
+
+  asset      Asset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  assignedTo User? @relation("MaintenanceAssignedTo", fields: [assignedToUserId], references: [id])
+  createdBy  User? @relation("MaintenanceCreatedBy", fields: [createdByUserId], references: [id])
+
+  @@index([assetId])
+  @@index([status])
+  @@index([reportedDate])
+  @@map("maintenance_records")
+}
+
+// =============================================================================
+// AUDIT LOGS
+// =============================================================================
+
+model AuditLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String?  @db.Uuid
+  /// e.g. CREATE, UPDATE, DELETE, ASSIGN, RETURN, ISSUE, LOGIN
+  action     String   @db.VarChar(100)
+  /// e.g. asset, stock_item, purchase, employee
+  entityType String   @db.VarChar(100)
+  entityId   String?  @db.Uuid
+  oldValues  Json?
+  newValues  Json?
+  ipAddress  String?  @db.VarChar(45)
+  createdAt  DateTime @default(now()) @db.Timestamptz
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// =============================================================================
+// IMPORT BATCHES
+// =============================================================================
+
+model ImportBatch {
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fileName         String            @db.VarChar(255)
+  /// e.g. assets, stock_items, employees
+  entityType       String            @db.VarChar(100)
+  totalRows        Int
+  successfulRows   Int               @default(0)
+  failedRows       Int               @default(0)
+  status           ImportBatchStatus @default(PENDING)
+  importedByUserId String?           @db.Uuid
+  createdAt        DateTime          @default(now()) @db.Timestamptz
+  completedAt      DateTime?         @db.Timestamptz
+
+  importedBy User?        @relation(fields: [importedByUserId], references: [id])
+  rows       ImportRow[]
+
+  @@map("import_batches")
+}
+
+// =============================================================================
+// IMPORT ROWS
+// =============================================================================
+
+model ImportRow {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  batchId         String        @db.Uuid
+  rowNumber       Int
+  /// Original Excel row data preserved exactly as supplied
+  rawData         Json
+  status          ImportRowStatus @default(PENDING)
+  errorMessage    String?       @db.Text
+  /// UUID of the entity created from this row, if successful
+  createdEntityId String?       @db.Uuid
+  createdAt       DateTime      @default(now()) @db.Timestamptz
+
+  batch ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([status])
+  @@map("import_rows")
 }
