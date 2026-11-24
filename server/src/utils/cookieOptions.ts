@@ -6,7 +6,7 @@ import { env } from "./env.js";
 export function buildSessionCookieOptions(expiresAt: Date): object {
   return {
     httpOnly: true,
-    sameSite: "lax" as const,
+    sameSite: "strict" as const,
     secure: env.NODE_ENV === "production",
     path: "/",
     expires: expiresAt,
@@ -21,7 +21,7 @@ export function buildSessionCookieOptions(expiresAt: Date): object {
 export function clearSessionCookieOptions(): object {
   return {
     httpOnly: true,
-    sameSite: "lax" as const,
+    sameSite: "strict" as const,
     secure: env.NODE_ENV === "production",
     path: "/",
     expires: new Date(0),

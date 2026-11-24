@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { validateOrigin } from "../middleware/validateOrigin.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { requirePasswordChanged } from "../middleware/requirePasswordChanged.js";
 import { requirePermission } from "../middleware/requirePermission.js";
@@ -16,13 +17,14 @@ const router = Router();
 // ── Create user ─────────────────────────────────────────────────────────────
 router.post(
   "/",
+  validateOrigin,
   requireAuth,
   requirePasswordChanged,
   requirePermission("users.create"),
   createUserAccount
 );
 
-// ── List / search users ──────────────────────────────────────────────────────
+// ── List / search users ─────────────────────────────���────────────────────────
 router.get(
   "/",
   requireAuth,
@@ -43,6 +45,7 @@ router.get(
 // ── Activate user ────────────────────────────────────────────────────────────
 router.patch(
   "/:userId/activate",
+  validateOrigin,
   requireAuth,
   requirePasswordChanged,
   requirePermission("users.activate"),
@@ -52,6 +55,7 @@ router.patch(
 // ── Deactivate user ──────────────────────────────────────────────────────────
 router.patch(
   "/:userId/deactivate",
+  validateOrigin,
   requireAuth,
   requirePasswordChanged,
   requirePermission("users.deactivate"),
@@ -61,6 +65,7 @@ router.patch(
 // ── Reset password ───────────────────────────────────────────────────────────
 router.post(
   "/:userId/reset-password",
+  validateOrigin,
   requireAuth,
   requirePasswordChanged,
   requirePermission("users.reset_password"),

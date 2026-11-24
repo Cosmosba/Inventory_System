@@ -139,49 +139,116 @@ describe("validateSession — rejection logic", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. validateOrigin — pure decision logic
-//    Test the exact branching logic from validateOrigin middleware.
+// 3. validateOrigin — pure decision logic (Stage 4C.6: centralized CSRF)
+//    Tests the updated middleware: state-changing methods require a present,
+//    non-null Origin that matches FRONTEND_ORIGIN exactly.
+//    Safe methods (GET, HEAD, OPTIONS) pass unconditionally.
 // ---------------------------------------------------------------------------
 
 describe("validateOrigin — decision logic", () => {
   const TRUSTED = "http://localhost:5173";
+  const STATE_CHANGING = ["POST", "PUT", "PATCH", "DELETE"];
+  const SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
 
-  // Replicate the exact decision logic from validateOrigin middleware
+  // Replicate the exact decision logic from the updated validateOrigin middleware
   function shouldAllow(
+    method: string,
     frontendOrigin: string | undefined,
     requestOrigin: string | undefined
   ): boolean {
+    // Safe methods always pass
+    if (!STATE_CHANGING.includes(method)) return true;
+    // No FRONTEND_ORIGIN configured — allow (development without frontend)
     if (!frontendOrigin) return true;
-    if (!requestOrigin) return true;
+    // Missing or "null" Origin on state-changing request — reject
+    if (!requestOrigin || requestOrigin === "null") return false;
+    // Exact match only
     return requestOrigin === frontendOrigin;
   }
 
   it("allows when FRONTEND_ORIGIN is not configured", () => {
-    assert.ok(shouldAllow(undefined, "https://anywhere.example.com"));
+    assert.ok(shouldAllow("POST", undefined, undefined));
+    assert.ok(shouldAllow("POST", undefined, "https://anywhere.example.com"));
   });
 
-  it("allows when no Origin header is present", () => {
-    assert.ok(shouldAllow(TRUSTED, undefined));
+  it("allows GET regardless of Origin", () => {
+    assert.ok(shouldAllow("GET", TRUSTED, undefined));
+    assert.ok(shouldAllow("GET", TRUSTED, "https://evil.example.com"));
   });
 
-  it("allows when Origin matches FRONTEND_ORIGIN exactly", () => {
-    assert.ok(shouldAllow(TRUSTED, TRUSTED));
+  it("allows HEAD regardless of Origin", () => {
+    assert.ok(shouldAllow("HEAD", TRUSTED, undefined));
+  });
+
+  it("allows OPTIONS regardless of Origin (CORS preflight)", () => {
+    assert.ok(shouldAllow("OPTIONS", TRUSTED, undefined));
+    assert.ok(shouldAllow("OPTIONS", TRUSTED, "https://evil.example.com"));
+  });
+
+  it("allows POST when Origin matches FRONTEND_ORIGIN exactly", () => {
+    assert.ok(shouldAllow("POST", TRUSTED, TRUSTED));
+  });
+
+  it("allows PATCH when Origin matches FRONTEND_ORIGIN exactly", () => {
+    assert.ok(shouldAllow("PATCH", TRUSTED, TRUSTED));
+  });
+
+  it("allows DELETE when Origin matches FRONTEND_ORIGIN exactly", () => {
+    assert.ok(shouldAllow("DELETE", TRUSTED, TRUSTED));
+  });
+
+  it("rejects POST with missing Origin when FRONTEND_ORIGIN is configured", () => {
+    assert.ok(!shouldAllow("POST", TRUSTED, undefined));
+  });
+
+  it("rejects PATCH with missing Origin when FRONTEND_ORIGIN is configured", () => {
+    assert.ok(!shouldAllow("PATCH", TRUSTED, undefined));
+  });
+
+  it("rejects DELETE with missing Origin when FRONTEND_ORIGIN is configured", () => {
+    assert.ok(!shouldAllow("DELETE", TRUSTED, undefined));
+  });
+
+  it("rejects PUT with missing Origin when FRONTEND_ORIGIN is configured", () => {
+    assert.ok(!shouldAllow("PUT", TRUSTED, undefined));
+  });
+
+  it("rejects Origin: null on state-changing requests", () => {
+    assert.ok(!shouldAllow("POST", TRUSTED, "null"));
   });
 
   it("rejects when Origin does not match FRONTEND_ORIGIN", () => {
-    assert.ok(!shouldAllow(TRUSTED, "https://evil.example.com"));
+    assert.ok(!shouldAllow("POST", TRUSTED, "https://evil.example.com"));
   });
 
   it("rejects a subdomain of the trusted origin", () => {
-    assert.ok(!shouldAllow(TRUSTED, "http://sub.localhost:5173"));
+    assert.ok(!shouldAllow("POST", TRUSTED, "http://sub.localhost:5173"));
   });
 
   it("rejects a different port on the same host", () => {
-    assert.ok(!shouldAllow(TRUSTED, "http://localhost:9999"));
+    assert.ok(!shouldAllow("POST", TRUSTED, "http://localhost:9999"));
   });
 
   it("rejects a wildcard — wildcard is never a valid origin", () => {
-    assert.ok(!shouldAllow(TRUSTED, "*"));
+    assert.ok(!shouldAllow("POST", TRUSTED, "*"));
+  });
+
+  it("safe methods are not blocked even with a mismatched Origin", () => {
+    for (const method of SAFE_METHODS) {
+      assert.ok(shouldAllow(method, TRUSTED, "https://evil.example.com"),
+        `${method} should not be blocked`);
+    }
+  });
+
+  it("all state-changing methods require a matching Origin", () => {
+    for (const method of STATE_CHANGING) {
+      assert.ok(!shouldAllow(method, TRUSTED, undefined),
+        `${method} with missing Origin should be rejected`);
+      assert.ok(!shouldAllow(method, TRUSTED, "https://evil.example.com"),
+        `${method} with wrong Origin should be rejected`);
+      assert.ok(shouldAllow(method, TRUSTED, TRUSTED),
+        `${method} with correct Origin should be allowed`);
+    }
   });
 });
 
@@ -267,14 +334,14 @@ describe("clearSessionCookieOptions — shape", () => {
   // Replicate the exact logic from cookieOptions.ts
   function clearOpts(nodeEnv: string): {
     httpOnly: boolean;
-    sameSite: "lax";
+    sameSite: "strict";
     secure: boolean;
     path: string;
     expires: Date;
   } {
     return {
       httpOnly: true,
-      sameSite: "lax",
+      sameSite: "strict",
       secure: nodeEnv === "production",
       path: "/",
       expires: new Date(0),
@@ -291,8 +358,8 @@ describe("clearSessionCookieOptions — shape", () => {
     assert.equal(clearOpts("development").httpOnly, true);
   });
 
-  it("sets sameSite=lax", () => {
-    assert.equal(clearOpts("development").sameSite, "lax");
+  it("sets sameSite=strict", () => {
+    assert.equal(clearOpts("development").sameSite, "strict");
   });
 
   it("sets path=/", () => {
@@ -317,7 +384,7 @@ describe("buildSessionCookieOptions — attribute consistency with clear options
   function buildOpts(nodeEnv: string, expiresAt: Date) {
     return {
       httpOnly: true,
-      sameSite: "lax" as const,
+      sameSite: "strict" as const,
       secure: nodeEnv === "production",
       path: "/",
       expires: expiresAt,
@@ -327,7 +394,7 @@ describe("buildSessionCookieOptions — attribute consistency with clear options
   function clearOpts(nodeEnv: string) {
     return {
       httpOnly: true,
-      sameSite: "lax" as const,
+      sameSite: "strict" as const,
       secure: nodeEnv === "production",
       path: "/",
       expires: new Date(0),

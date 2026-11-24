@@ -15,11 +15,11 @@ const loginLimiter = rateLimit({
 
 const router = Router();
 
-router.post("/login", loginLimiter, login);
+router.post("/login", validateOrigin, loginLimiter, login);
 router.post("/logout", validateOrigin, logout);
 router.get("/me", requireAuth, me);
 
 // Accessible to users with mustChangePassword = true — no requirePasswordChanged here.
-router.post("/change-password", requireAuth, changePassword);
+router.post("/change-password", validateOrigin, requireAuth, changePassword);
 
 export default router;

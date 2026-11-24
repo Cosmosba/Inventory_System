@@ -93,18 +93,18 @@ describe("session token internals", () => {
 // ---------------------------------------------------------------------------
 
 describe("session cookie options", () => {
-  it("sets httpOnly, sameSite lax, path / in development", () => {
+  it("sets httpOnly, sameSite strict, path / in development", () => {
     const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000);
     const opts = {
       httpOnly: true,
-      sameSite: "lax" as const,
+      sameSite: "strict" as const,
       secure: false,
       path: "/",
       expires: expiresAt,
     };
 
     assert.equal(opts.httpOnly, true);
-    assert.equal(opts.sameSite, "lax");
+    assert.equal(opts.sameSite, "strict");
     assert.equal(opts.secure, false);
     assert.equal(opts.path, "/");
     assert.ok(opts.expires instanceof Date);
@@ -114,7 +114,7 @@ describe("session cookie options", () => {
   it("sets secure=true in production", () => {
     const opts = {
       httpOnly: true,
-      sameSite: "lax" as const,
+      sameSite: "strict" as const,
       secure: true,
       path: "/",
       expires: new Date(),

@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import { env } from "./utils/env.js";
+import { validateOrigin } from "./middleware/validateOrigin.js";
 import healthRouter from "./routes/health.js";
 import authRouter from "./routes/auth.js";
 import usersRouter from "./routes/users.js";
@@ -25,6 +26,14 @@ if (env.FRONTEND_ORIGIN) {
 
 app.use(express.json());
 app.use(cookieParser());
+
+// ---------------------------------------------------------------------------
+// CSRF protection — centralized Origin validation for all state-changing
+// requests (POST, PUT, PATCH, DELETE). Mounted before all route handlers so
+// every current and future route is covered automatically.
+// GET, HEAD and OPTIONS pass through unconditionally.
+// ---------------------------------------------------------------------------
+app.use(validateOrigin);
 
 app.use("/api", healthRouter);
 app.use("/api/auth", authRouter);
