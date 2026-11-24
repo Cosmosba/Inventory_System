@@ -191,8 +191,11 @@ model User {
   /// Never returned in API responses — enforced at the application layer
   passwordHash String    @db.Text
   employeeId   String?   @unique @db.Uuid
-  isActive     Boolean   @default(true)
-  lastLoginAt  DateTime? @db.Timestamptz
+  isActive            Boolean   @default(true)
+  /// True when the user must change their password before accessing the application.
+  /// Set on account creation and after an administrator password reset.
+  mustChangePassword  Boolean   @default(false)
+  lastLoginAt         DateTime? @db.Timestamptz
   createdAt    DateTime  @default(now()) @db.Timestamptz
   updatedAt    DateTime  @updatedAt @db.Timestamptz
 
@@ -208,9 +211,31 @@ model User {
   importBatches             ImportBatch[]
   departmentHistoryRecorded EmployeeDepartmentHistory[]  @relation("HistoryRecordedBy")
   userRolesAssigned         UserRole[]                   @relation("UserRoleAssignedBy")
+  sessions                  UserSession[]
 
   /// username, email and employeeId indexes are provided by their @unique constraints.
   @@map("users")
+}
+
+// =============================================================================
+// USER SESSIONS
+// =============================================================================
+
+model UserSession {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String    @db.Uuid
+  /// SHA-256 hex digest of the opaque session token — 64 characters
+  tokenHash      String    @unique @db.Char(64)
+  expiresAt      DateTime  @db.Timestamptz
+  createdAt      DateTime  @default(now()) @db.Timestamptz
+  lastAccessedAt DateTime  @db.Timestamptz
+  revokedAt      DateTime? @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("user_sessions")
 }
 
 // =============================================================================

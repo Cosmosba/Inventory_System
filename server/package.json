@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "tsx --test src/__tests__/**/*.test.ts",
+    "seed:roles": "tsx src/scripts/seedRolesAndPermissions.ts"
   },
   "keywords": [],
   "author": "",
@@ -17,11 +18,18 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
+    "argon2": "^0.45.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
     "dotenv": "^18.0.10",
     "express": "^5.3.0",
-    "pg": "^8.23.1"
+    "express-rate-limit": "^8.7.4",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.6",
     "nodemon": "^3.1.14",
@@ -31,6 +39,8 @@
   },
   "allowScripts": {
     "prisma@7.10.1": true,
-    "@prisma/engines@7.10.1": true
+    "@prisma/engines@7.10.1": true,
+    "argon2@0.45.2": true,
+    "esbuild@0.28.2": true
   }
 }
