@@ -110,3 +110,18 @@ export async function revokeAllSessions(userId: string): Promise<void> {
     data: { revokedAt: new Date() },
   });
 }
+
+/**
+ * Revoke ALL active sessions for a user inside an existing transaction.
+ * Accepts a transaction-scoped Prisma client so the revocation participates
+ * in the caller's transaction and rolls back with it on failure.
+ */
+export async function revokeAllSessionsTx(
+  userId: string,
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
+): Promise<void> {
+  await tx.userSession.updateMany({
+    where: { userId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+}

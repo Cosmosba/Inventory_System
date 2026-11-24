@@ -1,5 +1,6 @@
 import prisma from "../config/database.js";
 import { hashPassword } from "./passwordService.js";
+import { revokeAllSessionsTx } from "./sessionService.js";
 
 /**
  * Generates the default password for a new account.
@@ -180,4 +181,308 @@ export async function resetUserPassword(
   });
 
   return { defaultPassword };
+}
+
+// ---------------------------------------------------------------------------
+// List / search users
+// ---------------------------------------------------------------------------
+
+export interface ListUsersInput {
+  search?: string;
+  isActive?: boolean;
+  page: number;
+  pageSize: number;
+}
+
+export interface UserListItem {
+  id: string;
+  username: string;
+  email: string;
+  isActive: boolean;
+  mustChangePassword: boolean;
+  createdAt: Date;
+  lastLoginAt: Date | null;
+  employee: { firstName: string; lastName: string } | null;
+  roles: string[];
+}
+
+export interface ListUsersResult {
+  users: UserListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export async function listUsers(input: ListUsersInput): Promise<ListUsersResult> {
+  const { search, isActive, page, pageSize } = input;
+
+  const where: NonNullable<Parameters<typeof prisma.user.findMany>[0]>["where"] = {};
+
+  if (isActive !== undefined) {
+    where.isActive = isActive;
+  }
+
+  if (search) {
+    const term = search.trim();
+    where.OR = [
+      { username: { contains: term, mode: "insensitive" } },
+      { email: { contains: term, mode: "insensitive" } },
+      {
+        employee: {
+          OR: [
+            { firstName: { contains: term, mode: "insensitive" } },
+            { lastName: { contains: term, mode: "insensitive" } },
+          ],
+        },
+      },
+    ];
+  }
+
+  const [users, total] = await prisma.$transaction([
+    prisma.user.findMany({
+      where,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        isActive: true,
+        mustChangePassword: true,
+        createdAt: true,
+        lastLoginAt: true,
+        employee: { select: { firstName: true, lastName: true } },
+        roles: { select: { role: { select: { name: true } } } },
+      },
+    }),
+    prisma.user.count({ where }),
+  ]);
+
+  return {
+    users: users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      email: u.email,
+      isActive: u.isActive,
+      mustChangePassword: u.mustChangePassword,
+      createdAt: u.createdAt,
+      lastLoginAt: u.lastLoginAt,
+      employee: u.employee,
+      roles: u.roles.map((r) => r.role.name),
+    })),
+    total,
+    page,
+    pageSize,
+    totalPages: Math.ceil(total / pageSize),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Get single user
+// ---------------------------------------------------------------------------
+
+export interface UserDetail {
+  id: string;
+  username: string;
+  email: string;
+  isActive: boolean;
+  mustChangePassword: boolean;
+  createdAt: Date;
+  lastLoginAt: Date | null;
+  employee: { firstName: string; lastName: string; email: string; jobTitle: string | null } | null;
+  roles: string[];
+  auditHistory: Array<{
+    action: string;
+    initiatorId: string | null;
+    createdAt: Date;
+    newValues: unknown;
+  }>;
+}
+
+export async function getUserById(targetUserId: string): Promise<UserDetail> {
+  const user = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: {
+      id: true,
+      username: true,
+      email: true,
+      isActive: true,
+      mustChangePassword: true,
+      createdAt: true,
+      lastLoginAt: true,
+      employee: {
+        select: { firstName: true, lastName: true, email: true, jobTitle: true },
+      },
+      roles: { select: { role: { select: { name: true } } } },
+    },
+  });
+
+  if (!user) {
+    throw new UserServiceError("User not found.", "USER_NOT_FOUND");
+  }
+
+  const auditHistory = await prisma.auditLog.findMany({
+    where: { entityType: "user", entityId: targetUserId },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+    select: { action: true, userId: true, createdAt: true, newValues: true },
+  });
+
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    isActive: user.isActive,
+    mustChangePassword: user.mustChangePassword,
+    createdAt: user.createdAt,
+    lastLoginAt: user.lastLoginAt,
+    employee: user.employee,
+    roles: user.roles.map((r) => r.role.name),
+    auditHistory: auditHistory.map((a) => ({
+      action: a.action,
+      initiatorId: a.userId,
+      createdAt: a.createdAt,
+      newValues: a.newValues,
+    })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Activate user
+// ---------------------------------------------------------------------------
+
+export async function activateUser(
+  targetUserId: string,
+  initiatorUserId: string
+): Promise<{ alreadyActive: boolean }> {
+  const user = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: { id: true, isActive: true },
+  });
+
+  if (!user) {
+    throw new UserServiceError("User not found.", "USER_NOT_FOUND");
+  }
+
+  if (user.isActive) {
+    return { alreadyActive: true };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: targetUserId },
+      data: { isActive: true },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId: initiatorUserId,
+        action: "ACTIVATE_USER",
+        entityType: "user",
+        entityId: targetUserId,
+        newValues: { isActive: true },
+      },
+    });
+  });
+
+  return { alreadyActive: false };
+}
+
+// ---------------------------------------------------------------------------
+// Deactivate user
+// ---------------------------------------------------------------------------
+
+export async function deactivateUser(
+  targetUserId: string,
+  initiatorUserId: string
+): Promise<{ alreadyInactive: boolean }> {
+  const user = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: {
+      id: true,
+      isActive: true,
+      roles: { select: { role: { select: { name: true } } } },
+    },
+  });
+
+  if (!user) {
+    throw new UserServiceError("User not found.", "USER_NOT_FOUND");
+  }
+
+  // Already-inactive: revoke any outstanding sessions (idempotent safety net
+  // for retry after a prior partial failure) but do NOT create a duplicate
+  // audit entry. Session revocation is still inside a transaction so a
+  // revocation failure does not silently succeed.
+  if (!user.isActive) {
+    await prisma.$transaction(async (tx) => {
+      await revokeAllSessionsTx(targetUserId, tx);
+    });
+    return { alreadyInactive: true };
+  }
+
+  const isAdmin = user.roles.some((r) => r.role.name === "ADMIN");
+
+  if (isAdmin) {
+    // Concurrency-safe check: use Serializable isolation so two concurrent
+    // deactivations of the last two admins cannot both succeed.
+    // No schema migration required — this is a transaction isolation strategy.
+    await prisma.$transaction(
+      async (tx) => {
+        const activeAdminCount = await tx.user.count({
+          where: {
+            isActive: true,
+            roles: { some: { role: { name: "ADMIN" } } },
+          },
+        });
+
+        if (activeAdminCount <= 1) {
+          throw new UserServiceError(
+            "Cannot deactivate the last active administrator account.",
+            "LAST_ADMIN"
+          );
+        }
+
+        await tx.user.update({
+          where: { id: targetUserId },
+          data: { isActive: false },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            userId: initiatorUserId,
+            action: "DEACTIVATE_USER",
+            entityType: "user",
+            entityId: targetUserId,
+            newValues: { isActive: false },
+          },
+        });
+
+        await revokeAllSessionsTx(targetUserId, tx);
+      },
+      { isolationLevel: "Serializable" }
+    );
+  } else {
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: targetUserId },
+        data: { isActive: false },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          userId: initiatorUserId,
+          action: "DEACTIVATE_USER",
+          entityType: "user",
+          entityId: targetUserId,
+          newValues: { isActive: false },
+        },
+      });
+
+      await revokeAllSessionsTx(targetUserId, tx);
+    });
+  }
+
+  return { alreadyInactive: false };
 }

@@ -1,6 +1,14 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
-import { createUser, resetUserPassword, UserServiceError } from "../services/userService.js";
+import {
+  createUser,
+  resetUserPassword,
+  listUsers,
+  getUserById,
+  activateUser,
+  deactivateUser,
+  UserServiceError,
+} from "../services/userService.js";
 import { revokeAllSessions } from "../services/sessionService.js";
 
 const createUserSchema = z.object({
@@ -113,8 +121,10 @@ export async function resetPassword(req: Request, res: Response): Promise<void> 
     const result = await resetUserPassword(targetUserId, initiatorUserId);
 
     // Revoke all sessions for the target user so they must re-authenticate.
-    // Non-fatal: do not fail the reset if revocation encounters a transient error.
-    await revokeAllSessions(targetUserId).catch(() => {});
+    // This is not fire-and-forget: if revocation fails the error propagates
+    // to the global handler (500). The password update is already committed,
+    // but the administrator is informed rather than receiving a false success.
+    await revokeAllSessions(targetUserId);
 
     res.status(200).json({
       success: true,
@@ -148,6 +158,174 @@ export async function resetPassword(req: Request, res: Response): Promise<void> 
       return;
     }
 
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// List / search users
+// ---------------------------------------------------------------------------
+
+const PAGE_SIZE_MAX = 100;
+const PAGE_SIZE_DEFAULT = 20;
+
+const listUsersQuerySchema = z.object({
+  search: z.string().max(200).optional(),
+  isActive: z
+    .enum(["true", "false"])
+    .transform((v) => v === "true")
+    .optional(),
+  page: z.coerce
+    .number()
+    .int()
+    .min(1, "page must be at least 1")
+    .default(1),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .min(1, "pageSize must be at least 1")
+    .max(PAGE_SIZE_MAX, `pageSize must not exceed ${PAGE_SIZE_MAX}`)
+    .default(PAGE_SIZE_DEFAULT),
+});
+
+export async function listUsersHandler(req: Request, res: Response): Promise<void> {
+  const parsed = listUsersQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({
+      success: false,
+      message: "Validation failed",
+      errors: parsed.error.flatten().fieldErrors,
+    });
+    return;
+  }
+
+  const result = await listUsers(parsed.data);
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Get single user
+// ---------------------------------------------------------------------------
+
+const userIdParamSchema = z.object({
+  userId: z.string().uuid("userId must be a valid UUID"),
+});
+
+export async function getUserByIdHandler(req: Request, res: Response): Promise<void> {
+  const parsed = userIdParamSchema.safeParse(req.params);
+  if (!parsed.success) {
+    res.status(400).json({
+      success: false,
+      message: "Validation failed",
+      errors: parsed.error.flatten().fieldErrors,
+    });
+    return;
+  }
+
+  try {
+    const user = await getUserById(parsed.data.userId);
+    res.status(200).json({ success: true, data: { user } });
+  } catch (err) {
+    if (err instanceof UserServiceError && err.code === "USER_NOT_FOUND") {
+      res.status(404).json({ success: false, message: err.message });
+      return;
+    }
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Activate user
+// ---------------------------------------------------------------------------
+
+export async function activateUserHandler(req: Request, res: Response): Promise<void> {
+  const parsed = userIdParamSchema.safeParse(req.params);
+  if (!parsed.success) {
+    res.status(400).json({
+      success: false,
+      message: "Validation failed",
+      errors: parsed.error.flatten().fieldErrors,
+    });
+    return;
+  }
+
+  const { userId: targetUserId } = parsed.data;
+  const initiatorUserId = req.user!.id;
+
+  try {
+    const { alreadyActive } = await activateUser(targetUserId, initiatorUserId);
+
+    res.status(200).json({
+      success: true,
+      message: alreadyActive ? "Account is already active." : "Account activated successfully.",
+    });
+  } catch (err) {
+    if (err instanceof UserServiceError && err.code === "USER_NOT_FOUND") {
+      res.status(404).json({ success: false, message: err.message });
+      return;
+    }
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Deactivate user
+// ---------------------------------------------------------------------------
+
+export async function deactivateUserHandler(req: Request, res: Response): Promise<void> {
+  const parsed = userIdParamSchema.safeParse(req.params);
+  if (!parsed.success) {
+    res.status(400).json({
+      success: false,
+      message: "Validation failed",
+      errors: parsed.error.flatten().fieldErrors,
+    });
+    return;
+  }
+
+  const { userId: targetUserId } = parsed.data;
+  const initiatorUserId = req.user!.id;
+
+  try {
+    const { alreadyInactive } = await deactivateUser(targetUserId, initiatorUserId);
+
+    res.status(200).json({
+      success: true,
+      message: alreadyInactive
+        ? "Account is already inactive."
+        : "Account deactivated successfully.",
+    });
+  } catch (err) {
+    if (err instanceof UserServiceError) {
+      if (err.code === "USER_NOT_FOUND") {
+        res.status(404).json({ success: false, message: err.message });
+        return;
+      }
+      if (err.code === "LAST_ADMIN") {
+        res.status(409).json({ success: false, message: err.message });
+        return;
+      }
+    }
+    // Prisma P2034: serialization conflict from concurrent Serializable transactions.
+    // The transaction was fully rolled back — no partial state was written.
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      "code" in err &&
+      (err as { code: string }).code === "P2034"
+    ) {
+      res.status(409).json({
+        success: false,
+        code: "CONCURRENT_MODIFICATION",
+        message:
+          "The operation could not be completed due to a concurrent account-management change. Please retry.",
+      });
+      return;
+    }
     throw err;
   }
 }

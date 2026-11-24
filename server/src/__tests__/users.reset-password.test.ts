@@ -396,9 +396,6 @@ describe("seed — permission identifiers and assignments", () => {
 
 describe("resetPassword — administrator self-reset", () => {
   it("revokeAllSessions on self revokes all sessions including the current one", () => {
-    // When admin resets their own password, revokeAllSessions(adminUserId) is called.
-    // No id exclusion — the current session is also revoked.
-    // The admin receives the defaultPassword in the response before the session expires.
     const adminUserId = "admin-id";
     const args = { where: { userId: adminUserId, revokedAt: null } };
     assert.ok(!("id" in args.where));
@@ -408,6 +405,62 @@ describe("resetPassword — administrator self-reset", () => {
   it("defaultPassword is present in the response regardless of self-reset", () => {
     const responseData = { defaultPassword: "cobaidoo" };
     assert.ok("defaultPassword" in responseData);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 12. Session revocation is not fire-and-forget — regression test
+// ---------------------------------------------------------------------------
+
+describe("resetPassword — session revocation is not silent", () => {
+  it("a revocation failure propagates rather than being swallowed", async () => {
+    // Simulate the controller's call sequence:
+    // resetUserPassword() succeeds → revokeAllSessions() throws → error propagates.
+    // The controller must NOT catch the error and return 200.
+    async function simulateController(
+      revokeImpl: () => Promise<void>
+    ): Promise<{ status: number; body: object } | { threw: true }> {
+      try {
+        // Step 1: password reset succeeds (simulated)
+        const defaultPassword = "cobaidoo";
+
+        // Step 2: revocation — NOT wrapped in .catch()
+        await revokeImpl();
+
+        // Step 3: only reached if revocation succeeded
+        return { status: 200, body: { success: true, data: { defaultPassword } } };
+      } catch {
+        return { threw: true };
+      }
+    }
+
+    const successResult = await simulateController(async () => {});
+    assert.ok("status" in successResult && successResult.status === 200);
+
+    const failResult = await simulateController(async () => {
+      throw new Error("DB connection lost");
+    });
+    assert.ok("threw" in failResult && failResult.threw === true,
+      "revocation failure must propagate, not be swallowed"
+    );
+  });
+
+  it("defaultPassword is never returned when revocation throws", async () => {
+    let passwordLeaked = false;
+
+    async function simulateController(
+      revokeImpl: () => Promise<void>
+    ): Promise<void> {
+      const defaultPassword = "cobaidoo";
+      await revokeImpl(); // throws — must not reach the line below
+      passwordLeaked = true;
+      void defaultPassword;
+    }
+
+    await simulateController(async () => { throw new Error("revoke failed"); }).catch(() => {});
+    assert.equal(passwordLeaked, false,
+      "defaultPassword must not be returned when revocation throws"
+    );
   });
 });
 

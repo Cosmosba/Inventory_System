@@ -25,6 +25,12 @@ export async function requireAuth(
 
   const { user } = session;
 
+  // Independent deactivation guard: reject even if session revocation failed.
+  if (!user.isActive) {
+    res.status(401).json({ success: false, message: "Authentication required" });
+    return;
+  }
+
   req.user = {
     id: user.id,
     username: user.username,
