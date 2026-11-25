@@ -6,6 +6,12 @@ import { validateOrigin } from "./middleware/validateOrigin.js";
 import healthRouter from "./routes/health.js";
 import authRouter from "./routes/auth.js";
 import usersRouter from "./routes/users.js";
+import departmentsRouter from "./routes/departments.js";
+import locationsRouter from "./routes/locations.js";
+import assetCategoriesRouter from "./routes/assetCategories.js";
+import vendorsRouter from "./routes/vendors.js";
+import employeesRouter from "./routes/employees.js";
+import assetsRouter from "./routes/assets.js";
 
 const app = express();
 
@@ -38,6 +44,12 @@ app.use(validateOrigin);
 app.use("/api", healthRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/users", usersRouter);
+app.use("/api/departments", departmentsRouter);
+app.use("/api/locations", locationsRouter);
+app.use("/api/asset-categories", assetCategoriesRouter);
+app.use("/api/vendors", vendorsRouter);
+app.use("/api/employees", employeesRouter);
+app.use("/api/assets", assetsRouter);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ success: false, message: "Route not found" });
