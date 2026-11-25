@@ -13,6 +13,7 @@ import vendorsRouter from "./routes/vendors.js";
 import employeesRouter from "./routes/employees.js";
 import assetsRouter from "./routes/assets.js";
 import stockRouter from "./routes/stock.js";
+import purchasesRouter from "./routes/purchases.js";
 
 const app = express();
 
@@ -52,6 +53,7 @@ app.use("/api/vendors", vendorsRouter);
 app.use("/api/employees", employeesRouter);
 app.use("/api/assets", assetsRouter);
 app.use("/api/stock", stockRouter);
+app.use("/api/purchases", purchasesRouter);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ success: false, message: "Route not found" });

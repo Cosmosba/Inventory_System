@@ -290,7 +290,7 @@ export async function updateStockItem(
  * Lock the stock_items row and return its current quantity.
  * Must be called inside a $transaction interactive callback.
  */
-async function lockAndReadQuantity(
+export async function lockAndReadQuantity(
   stockItemId: string,
   tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
 ): Promise<{ currentQuantity: number }> {
