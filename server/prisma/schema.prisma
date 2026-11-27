@@ -512,13 +512,19 @@ model AssetAssignment {
   employeeId       String    @db.Uuid
   departmentId     String?   @db.Uuid
   locationId       String?   @db.Uuid
-  assignedAt       DateTime  @default(now()) @db.Timestamptz
+  assignedAt          DateTime       @default(now()) @db.Timestamptz
   /// Null means the assignment is currently open (asset not yet returned)
-  returnedAt       DateTime? @db.Timestamptz
-  notes            String?   @db.Text
-  assignedByUserId String?   @db.Uuid
-  returnedByUserId String?   @db.Uuid
-  createdAt        DateTime  @default(now()) @db.Timestamptz
+  returnedAt          DateTime?      @db.Timestamptz
+  notes               String?        @db.Text
+  assignedByUserId    String?        @db.Uuid
+  returnedByUserId    String?        @db.Uuid
+  /// Optional expected return date captured at assignment time.
+  expectedReturnDate  DateTime?      @db.Date
+  /// Condition of the asset when returned.
+  returnCondition     AssetCondition?
+  /// Notes recorded at return time — separate from assignment-time notes.
+  returnNotes         String?        @db.Text
+  createdAt           DateTime       @default(now()) @db.Timestamptz
 
   asset      Asset      @relation(fields: [assetId], references: [id], onDelete: Restrict)
   employee   Employee   @relation("AssignmentEmployee", fields: [employeeId], references: [id], onDelete: Restrict)
