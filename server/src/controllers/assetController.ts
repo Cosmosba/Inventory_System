@@ -194,7 +194,7 @@ export async function retireAssetHandler(req: Request, res: Response): Promise<v
   } catch (err) {
     if (handleAssetNotFound(err, res)) return;
     if (err instanceof AssetServiceError) {
-      if (err.code === "ALREADY_RETIRED" || err.code === "INVALID_TRANSITION" || err.code === "ASSET_ASSIGNED") {
+      if (err.code === "ALREADY_RETIRED" || err.code === "INVALID_TRANSITION" || err.code === "ASSET_ASSIGNED" || err.code === "ASSET_UNDER_MAINTENANCE") {
         res.status(409).json({ success: false, message: err.message });
         return;
       }
@@ -215,7 +215,7 @@ export async function disposeAssetHandler(req: Request, res: Response): Promise<
   } catch (err) {
     if (handleAssetNotFound(err, res)) return;
     if (err instanceof AssetServiceError) {
-      if (err.code === "ALREADY_DISPOSED" || err.code === "ASSET_ASSIGNED") {
+      if (err.code === "ALREADY_DISPOSED" || err.code === "ASSET_ASSIGNED" || err.code === "ASSET_UNDER_MAINTENANCE") {
         res.status(409).json({ success: false, message: err.message });
         return;
       }

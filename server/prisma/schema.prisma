@@ -689,6 +689,9 @@ model MaintenanceRecord {
   repairCost         Decimal?          @db.Decimal(10, 2)
   technician         String?           @db.VarChar(150)
   assignedToUserId   String?           @db.Uuid
+  /// Set automatically when status transitions from REPORTED to IN_PROGRESS.
+  /// Never accepted from the client.
+  startedDate        DateTime?         @db.Date
   notes              String?           @db.Text
   createdByUserId    String?           @db.Uuid
   createdAt          DateTime          @default(now()) @db.Timestamptz

@@ -384,6 +384,12 @@ export async function retireAsset(id: string, initiatorUserId: string) {
       "ASSET_ASSIGNED"
     );
   }
+  if (existing.status === "UNDER_MAINTENANCE") {
+    throw new AssetServiceError(
+      "Asset is under maintenance and cannot be retired.",
+      "ASSET_UNDER_MAINTENANCE"
+    );
+  }
 
   const asset = await prisma.$transaction(async (tx) => {
     const updated = await tx.asset.update({
@@ -425,6 +431,12 @@ export async function disposeAsset(id: string, initiatorUserId: string) {
     throw new AssetServiceError(
       "Asset must be returned before it can be disposed.",
       "ASSET_ASSIGNED"
+    );
+  }
+  if (existing.status === "UNDER_MAINTENANCE") {
+    throw new AssetServiceError(
+      "Asset is under maintenance and cannot be disposed.",
+      "ASSET_UNDER_MAINTENANCE"
     );
   }
 
